@@ -1,8 +1,8 @@
 import xml.sax
-from utils import DocCleaner, writeIndexToFile
+from utils import DocCleaner
 from collections import defaultdict
 import time
-
+import os
 
 class WikiHandler(xml.sax.ContentHandler):
     def __init__(self, stemmer, stopWords, folderName):
@@ -36,6 +36,36 @@ class WikiHandler(xml.sax.ContentHandler):
     def reset(self):
         self.indexMap = defaultdict(list)
         self.dictID = {}
+    
+    def writeIndexToFile(self):
+        prevTitleOffset = self.offset
+        data = []
+        for key in sorted(self.indexMap.keys()):
+            string = key + ':' + ' '.join(self.indexMap[key])
+            data.append(string)
+
+        fileName = os.path.join(self.folderName, "index{0}.txt".format(self.fileCount))
+        with open(fileName, 'w') as f:
+            print('\n'.join(data), file=f)
+
+        data = []
+        dataOffset = []
+
+        for key in sorted(self.dictID):
+            string = ' '.join([str(key), self.dictID[key].strip()])
+            data.append(string)
+            dataOffset.append(str(prevTitleOffset))
+            prevTitleOffset += len(string) + 1
+
+        fileName = os.path.join(self.folderName, "title.txt")
+        with open(fileName, 'a') as f:
+            print('\n'.join(data), file=f)
+
+        fileName = os.path.join(self.folderName, "titleOffSet.txt")
+        with open(fileName, 'a') as f:
+            print('\n'.join(dataOffset), file=f)
+
+        return prevTitleOffset
 
     def createIndex(self):
         ID = self.pageCount
@@ -73,13 +103,8 @@ class WikiHandler(xml.sax.ContentHandler):
 
             self.indexMap[word].append(string)
         self.pageCount += 1
-        if self.pageCount % 10000 == 0:
-            self.offset = writeIndexToFile(
-                self.indexMap,
-                self.dictID,
-                self.fileCount,
-                self.offset,
-                self.folderName)
+        if self.pageCount % 20000 == 0:
+            self.offset = self.writeIndexToFile()
             self.reset()
             self.fileCount += 1
 

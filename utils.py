@@ -114,20 +114,16 @@ def mergeIndex(fileCount, folderName):
     finalCount = 0
     offsetSize = 0
 
-    for i in range(1, fileCount):
+    for i in range(fileCount):
         filename = os.path.join(folderName, "index{0}.txt".format(i))
         files[i] = open(filename, "r")
 
         top[i] = files[i].readline().strip()
         words[i] = top[i].split(":")
-        # print(i)
-        # print('=======================')
-        # print(words[i])
         if words[i][0] not in heap:
             heapq.heappush(heap, words[i][0])
 
     count = 0
-    # print(words)
     while any(flag):
         try:
             temp = heapq.heappop(heap)
@@ -140,7 +136,7 @@ def mergeIndex(fileCount, folderName):
             finalCount, offsetSize = writeFinalIndex(data, finalCount, offsetSize, folderName)
             if oldFileCount != finalCount:
                 data = defaultdict(list)
-        for i in range(1, fileCount):
+        for i in range(fileCount):
             if flag[i]:
                 if words[i][0] == temp:
                     data[temp].extend(words[i][1].split(" "))
@@ -155,35 +151,35 @@ def mergeIndex(fileCount, folderName):
     finalCount, offsetSize = writeFinalIndex(data, finalCount, offsetSize, folderName)
 
 
-def writeIndexToFile(index, dictID, fileNum, titleOffset, folderName):
-    prevTitleOffset = titleOffset
-    data = []
-    for key in sorted(index.keys()):
-        string = key + ':' + ' '.join(index[key])
-        data.append(string)
+# def writeIndexToFile(index, dictID, fileNum, titleOffset, folderName):
+#     prevTitleOffset = titleOffset
+#     data = []
+#     for key in sorted(index.keys()):
+#         string = key + ':' + ' '.join(index[key])
+#         data.append(string)
 
-    fileName = os.path.join(folderName, "index{0}.txt".format(fileNum))
-    with open(fileName, 'w') as f:
-        print('\n'.join(data), file=f)
+#     fileName = os.path.join(folderName, "index{0}.txt".format(fileNum))
+#     with open(fileName, 'w') as f:
+#         print('\n'.join(data), file=f)
 
-    data = []
-    dataOffset = []
+#     data = []
+#     dataOffset = []
 
-    for key in sorted(dictID):
-        string = ' '.join([str(key), dictID[key].strip()])
-        data.append(string)
-        dataOffset.append(str(prevTitleOffset))
-        prevTitleOffset += len(string) + 1
+#     for key in sorted(dictID):
+#         string = ' '.join([str(key), dictID[key].strip()])
+#         data.append(string)
+#         dataOffset.append(str(prevTitleOffset))
+#         prevTitleOffset += len(string) + 1
 
-    fileName = os.path.join(folderName, "title.txt")
-    with open(fileName, 'a') as f:
-        print('\n'.join(data), file=f)
+#     fileName = os.path.join(folderName, "title.txt")
+#     with open(fileName, 'a') as f:
+#         print('\n'.join(data), file=f)
 
-    fileName = os.path.join(folderName, "titleOffSet.txt")
-    with open(fileName, 'a') as f:
-        print('\n'.join(dataOffset), file=f)
+#     fileName = os.path.join(folderName, "titleOffSet.txt")
+#     with open(fileName, 'a') as f:
+#         print('\n'.join(dataOffset), file=f)
 
-    return prevTitleOffset
+#     return prevTitleOffset
 
 
 class DocCleaner():
