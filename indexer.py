@@ -17,8 +17,8 @@ if __name__ == '__main__':
     handler = WikiHandler(stemmer, stopWords, "./inverted_index")
     parser.setContentHandler(handler)
     filenames = [
-        "/home/manan/dump/enwiki-20200801-pages-articles-multistream1.xml-p1p30303",
-        "/home/manan/dump/enwiki-20200801-pages-articles-multistream2.xml-p30304p88444",
+        "/scratch/manan_goel/enwiki-20200801-pages-articles-multistream1.xml-p1p30303",
+        "/scratch/manan_goel/enwiki-20200801-pages-articles-multistream2.xml-p30304p88444",
         # "/home/manan/dump/enwiki-20200801-pages-articles-multistream3.xml-p88445p200509",
     ]
     for xmlFileName in filenames:
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     #     handler.fileCount,
     #     handler.offset,
     #     handler.folderName)
-    # handler.reset()
-    # handler.fileCount += 1
+    handler.reset()
+    handler.fileCount += 1
     # print(handler.fileCount, end='\n')
     mergeIndex(handler.fileCount, "./inverted_index")
