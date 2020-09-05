@@ -25,13 +25,14 @@ if __name__ == '__main__':
         parser.parse(xmlFileName)
 
     print("\nFinished Parsing")
-    handler.offset = writeIndexToFile(
-        handler.indexMap,
-        handler.dictID,
-        handler.fileCount,
-        handler.offset,
-        handler.folderName)
-    handler.reset()
-    handler.fileCount += 1
-    print(handler.fileCount, end='\n')
+    handler.offset = handler.writeIndexToFile()
+    # handler.offset = writeIndexToFile(
+    #     handler.indexMap,
+    #     handler.dictID,
+    #     handler.fileCount,
+    #     handler.offset,
+    #     handler.folderName)
+    # handler.reset()
+    # handler.fileCount += 1
+    # print(handler.fileCount, end='\n')
     mergeIndex(handler.fileCount, "./inverted_index")
