@@ -1,38 +1,47 @@
-import xml.sax
-from nltk.stem import SnowballStemmer
-from nltk.corpus import stopwords
-from collections import defaultdict
-import re
-from ParsingHandler import WikiHandler
-from utils import *
-from Stemmer import Stemmer
-import sys
 import os
-stemmer = Stemmer('english')
-stopWords = list(set(stopwords.words('english')))
+import re
+import sys
+import xml.sax
+from collections import defaultdict
+from heapq import heappop, heappush
 
+from nltk.corpus import stopwords
+from Stemmer import Stemmer
+from tqdm import tqdm
+
+from ParsingHandler import WikiHandler
+from utils import (DocCleaner, FieldWriter, mergeFiles, tokenize,
+                   writeFinalIndex, writeIntoFile)
 
 if __name__ == '__main__':
     parser = xml.sax.make_parser()
-    handler = WikiHandler(stemmer, stopWords, "./inverted_index")
+    stemmer = Stemmer('english')
+    stopWords = set(stopwords.words('english'))
+
+    handler = WikiHandler(stopWords, stemmer)
+
     parser.setContentHandler(handler)
-    filenames = [
-        "/scratch/manan_goel/enwiki-20200801-pages-articles-multistream1.xml-p1p30303",
-        "/scratch/manan_goel/enwiki-20200801-pages-articles-multistream2.xml-p30304p88444",
-        # "/home/manan/dump/enwiki-20200801-pages-articles-multistream3.xml-p88445p200509",
-    ]
+
+    xmlFolder = sys.argv[1]
+    filenames = [os.path.join(xmlFolder, i) for i in os.listdir(xmlFolder)]
+
+    if not os.path.exists('./inverted_index'):
+        os.mkdir('./inverted_index')
+
     for xmlFileName in filenames:
         parser.parse(xmlFileName)
 
-    print("\nFinished Parsing")
-    handler.offset = handler.writeIndexToFile()
-    # handler.offset = writeIndexToFile(
-    #     handler.indexMap,
-    #     handler.dictID,
-    #     handler.fileCount,
-    #     handler.offset,
-    #     handler.folderName)
-    handler.reset()
+    with open('./inverted_index/fileNumbers.txt', 'w') as f:
+        f.write(str(handler.pageCount))
+
+    handler.offset = writeIntoFile(
+        handler.indexMap,
+        handler.dictID,
+        handler.fileCount,
+        handler.offset)
+
+    handler.indexMap = defaultdict(list)
+    handler.dictID = defaultdict()
     handler.fileCount += 1
-    # print(handler.fileCount, end='\n')
-    mergeIndex(handler.fileCount, "./inverted_index")
+
+    mergeFiles(handler.fileCount)

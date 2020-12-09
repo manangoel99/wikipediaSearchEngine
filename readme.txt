@@ -1,0 +1,7 @@
+The code for the indexer is split into 3 files -> indexer.py, ParsingHandler.py and utils.py.
+The file utils.py consists of convenience functions some of which are used in searching as well.
+The code for the parsing handler and index creation is in ParsingHandler.py while code for modules like the document cleaner, file storage etc are implemented in utils.py. indexer.py is the master file from which everything else is called.
+I have used external merge sort to store the index and then perform a binary search for querying.
+The reported stats are on 3 processed dumps since that is the most I could perform locally. Indexing on the whole dump is running on ada at the time of submission.
+I store the number of occurrence of each word in each field which is split dynamically. These are stored in a sorted order. A temporary index map is first created and split across multiple files. All these files are then merged to store the words in an overall sorted order along with a corresponding offset file to perform seek operations during the binary search on the file. Another couple of files is similarly kept to track the titles. One final file keeps track of the overall vocabulary.
+The number of files in which the index is stored is dynamic and changes as the number of tokens increases.

@@ -1,92 +1,69 @@
-import xml.sax
-from utils import DocCleaner
-from collections import defaultdict
 import time
-import os
+import xml.sax
+from collections import defaultdict
+
+from utils import DocCleaner, writeIntoFile
+
 
 class WikiHandler(xml.sax.ContentHandler):
-    def __init__(self, stemmer, stopWords, folderName):
+    """
+    Content Handler class to deal with the article data found in the xml files
+    """
+    def __init__(self, stopwords, stemmer):
+        """
+        Constructor for the article content handler
+            Parameters:
+                stopwords (list): List of all stopwords in the corpus
+                stemmer   (Stemmer): Stemmer for preprocessing of the text 
+        """
         self.CurrentData = ''
         self.title = ''
         self.text = ''
         self.ID = ''
         self.idFlag = 0
+        self.stopwords = stopwords
         self.stemmer = stemmer
-        self.stopWords = stopWords
         self.pageCount = 0
-        self.indexMap = defaultdict(list)
         self.fileCount = 0
-        self.dictID = {}
-        self.offset = 0
-        self.titles = list()
-        self.stateDict = {
-            "title": "",
-            "body": "",
-            "info": "",
-            "categories": "",
-            "links": "",
-            "references": "",
-        }
-        self.cleaner = DocCleaner(self.stemmer, self.stopWords)
-        self.startTime = time.time()
-        self.fileNum = 0
-        self.folderName = folderName
-        print("Started Parsing")
-
-    def reset(self):
         self.indexMap = defaultdict(list)
-        self.dictID = {}
-    
-    def writeIndexToFile(self):
-        prevTitleOffset = self.offset
-        data = []
-        for key in sorted(self.indexMap.keys()):
-            string = key + ':' + ' '.join(self.indexMap[key])
-            data.append(string)
+        self.dictID = defaultdict()
+        self.offset = 0
+        self.startTime = time.time()
 
-        fileName = os.path.join(self.folderName, "index{0}.txt".format(self.fileCount))
-        with open(fileName, 'w') as f:
-            print('\n'.join(data), file=f)
-
-        data = []
-        dataOffset = []
-
-        for key in sorted(self.dictID):
-            string = ' '.join([str(key), self.dictID[key].strip()])
-            data.append(string)
-            dataOffset.append(str(prevTitleOffset))
-            prevTitleOffset += len(string) + 1
-
-        fileName = os.path.join(self.folderName, "title.txt")
-        with open(fileName, 'a') as f:
-            print('\n'.join(data), file=f)
-
-        fileName = os.path.join(self.folderName, "titleOffSet.txt")
-        with open(fileName, 'a') as f:
-            print('\n'.join(dataOffset), file=f)
-
-        return prevTitleOffset
-
-    def createIndex(self):
+    def createIndex(self, **details):
+        """
+        Takes article details as input and adds them to the index and writes to a file after every 10,000 articles.
+            Parameters:
+                title (list) : List of title tokens
+                body (list) : List of body tokens
+                info (list) : List of info tokens
+                categories (list) : List of categories tokens
+                links (list) : List of links tokens
+                references (list) : List of references tokens
+        """
         ID = self.pageCount
         words = defaultdict(int)
-        dictionary = {}
-        for key in self.stateDict.keys():
+        k = defaultdict()
+        for key in details.keys():
+            k[key] = None
+
+        for key in k.keys():
             d = defaultdict(int)
-            for word in self.stateDict[key]:
+            for word in details[key]:
                 d[word] += 1
                 words[word] += 1
-            dictionary[key] = d
+            k[key] = d
 
-        title = dictionary["title"]
-        body = dictionary["body"]
-        references = dictionary["references"]
-        info = dictionary["info"]
-        links = dictionary["links"]
-        categories = dictionary["categories"]
+        title = k['title']
+        body = k['body']
+        info = k['info']
+        categories = k['categories']
+        links = k['links']
+        references = k['references']
 
         for word in words.keys():
             t, b, i, c, l, r = title[word], body[word], info[word], categories[word], links[word], references[word]
+
             string = 'd' + str(ID)
             if t > 0:
                 string += 't' + str(t)
@@ -103,30 +80,35 @@ class WikiHandler(xml.sax.ContentHandler):
 
             self.indexMap[word].append(string)
         self.pageCount += 1
-        if self.pageCount % 20000 == 0:
-            self.offset = self.writeIndexToFile()
-            self.reset()
+        if self.pageCount % 10000 == 0:
+            self.offset = writeIntoFile(
+                self.indexMap, self.dictID, self.fileCount, self.offset)
+            self.indexMap = defaultdict(list)
+            self.dictID = defaultdict()
             self.fileCount += 1
 
     def startElement(self, tag, attributes):
+        """Callback method to xml handler"""
         self.CurrentData = tag
         if tag == 'page':
-            self.currentTime = time.time()
-            print(
-                "Page Number {0} Total Time {1}".format(
-                    self.pageCount,
-                    self.currentTime -
-                    self.startTime),
-                end='\r')
+            print(self.pageCount, time.time() - self.startTime, end='\r')
 
     def endElement(self, tag):
+        """Callback method to xml handler"""
         if tag == 'page':
+            d = DocCleaner(self.stopwords, self.stemmer)
             self.dictID[self.pageCount] = self.title.strip().encode(
-                'ascii', errors='ignore').decode()
-            self.stateDict["title"], self.stateDict["body"], self.stateDict["info"], self.stateDict["references"], self.stateDict[
-                "links"], self.stateDict["categories"] = self.cleaner.cleanData(0, self.text, self.title)
-            self.titles.append(self.stateDict["title"])
-            self.createIndex()
+                "ascii", errors="ignore").decode()
+            title, body, info, categories, links, references = d.processText(
+                self.pageCount, self.text, self.title)
+            # i = Indexer( )
+            self.createIndex(
+                title=title,
+                body=body,
+                info=info,
+                categories=categories,
+                links=links,
+                references=references)
             self.CurrentData = ''
             self.title = ''
             self.text = ''
@@ -134,6 +116,7 @@ class WikiHandler(xml.sax.ContentHandler):
             self.idFlag = 0
 
     def characters(self, content):
+        """Callback method to xml handler"""
         if self.CurrentData == 'title':
             self.title += content
         elif self.CurrentData == 'text':

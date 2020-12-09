@@ -1,0 +1,5 @@
+Index Size : 831 MB
+Number of files : 233
+Number of tokens : 1821921
+
+Please note this is on only 3 xml files

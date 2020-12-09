@@ -1,43 +1,209 @@
-import re
 import os
-import heapq
+import re
 from collections import defaultdict
-import tqdm
+from heapq import heappop, heappush
 
-class dataWriting():
-    def __init__(self, type):
-        self.data = []
-        self.offset = []
-        self.prev = 0
-        self.type = type
-    
-    def addData(self, string, offset):
-        self.data.append(string)
-        self.offset.append("{0} {1}".format(self.prev, offset))
-        self.prev += len(string) + 1
-    
-    def write(self, folderName, count):
-        filename = os.path.join(folderName, "{0}{1}.txt".format(self.type, count))
-        with open(filename, 'w') as f:
-            print('\n'.join(self.data), file=f)
-        
-        filename = os.path.join(folderName, "offset_{0}{1}.txt".format(self.type, count))
-        with open(filename, 'w') as f:
-            print('\n'.join(self.offset), file=f)
+from tqdm import tqdm
+
 
 def tokenize(data):
-    data = data.encode('ascii', errors='ignore').decode()
-    data = re.sub(r'http[^\ ]*\ ', r' ', data)
-    data = re.sub(r'&nbsp;|&lt;|&gt;|&amp;|&quot;|&apos;', r' ', data)
+    data = data.encode("ascii", errors="ignore").decode()
+    data = re.sub(r'http[^\ ]*\ ', r' ', data)  # removing urls
+    data = re.sub(r'&nbsp;|&lt;|&gt;|&amp;|&quot;|&apos;',
+                  r' ', data)  # removing html entities
     data = re.sub(
         r'\—|\%|\$|\'|\||\.|\*|\[|\]|\:|\;|\,|\{|\}|\(|\)|\=|\+|\-|\_|\#|\!|\`|\"|\?|\/|\>|\<|\&|\\|\u2013|\n',
         r' ',
-        data)
+        data)  # removing special characters
     return data.split()
 
 
-def writeFinalIndex(data, finalCount, offsetSize, folderName):
-    info = {
+class DocCleaner():
+    """Class to preprocess and clean each article"""
+    def __init__(self, stopwords, stemmer):
+        """
+        Constructor for the article content handler
+            Parameters:
+                stopwords (list): List of all stopwords in the corpus
+                stemmer   (Stemmer): Stemmer for preprocessing of the text 
+        """
+        self.stopwords = stopwords
+        self.stemmer = stemmer
+
+    def removeStopWords(self, data):
+        return [w for w in data if w not in self.stopwords]
+
+    def cleanUp(self, text):
+        data = tokenize(text)
+        data = self.removeStopWords(data)
+        data = self.stemmer.stemWords(data)
+
+        return data
+
+    def cleanTitle(self, text):
+        return self.cleanUp(text)
+
+    def cleanBody(self, text):
+        data = re.sub(r'\{\{.*\}\}', r' ', text)
+        return self.cleanUp(data)
+
+    def cleanInfobox(self, text):
+        data = text.split('\n')
+        flag = False
+        info = []
+
+        for line in data:
+            if re.match(r'\{\{infobox', line):
+                flag = True
+                info.append(re.sub(r'\{\{infobox(.*)', r'\1', line))
+            elif flag:
+                if line == '}}':
+                    flag = False
+                    continue
+                info.append(line)
+        return self.cleanUp(' '.join(info))
+
+    def cleanReferences(self, text):
+        data = text.split('\n')
+        refs = []
+        for line in data:
+            if re.search(r'<ref', line):
+                refs.append(
+                    re.sub(
+                        r'.*title[\ ]*=[\ ]*([^\|]*).*',
+                        r'\1',
+                        line))
+        return self.cleanUp(' '.join(refs))
+
+    def cleanCategories(self, text):
+        data = text.split('\n')
+        categories = []
+        for line in data:
+            if re.match(r'\[\[category', line):
+                categories.append(
+                    re.sub(
+                        r'\[\[category:(.*)\]\]',
+                        r'\1',
+                        line))
+
+        return self.cleanUp(' '.join(categories))
+
+    def cleanLinks(self, text):
+        data = text.split('\n')
+        links = []
+        for line in data:
+            if re.match(r'\*[\ ]*\[', line):
+                links.append(line)
+
+        return self.cleanUp(' '.join(links))
+
+    def cleanPart2(self, data):
+        return self.cleanReferences(data), self.cleanLinks(
+            data), self.cleanCategories(data)
+
+    def cleanPart1(self, data, title):
+        return self.cleanTitle(title), self.cleanBody(
+            data), self.cleanInfobox(data)
+
+    def processText(self, ID, text, title):
+        text = text.lower()  # Case Folding
+        data = text.split('==references==')
+
+        references = []
+        links = []
+        categories = []
+        if len(data) == 1:
+            data = text.split('== references == ')
+        else:
+            references, links, categories = self.cleanPart2(data[1])
+        title, body, info = self.cleanPart1(data[0], title.lower())
+
+        return title, body, info, categories, links, references
+
+
+class FieldWriter():
+    """Class to write the inverted index for a particular field to a file"""
+    def __init__(self, type):
+        """
+        Constructor
+            Parameters:
+                type (string) : Name of the field (t,b,c,l,r,i)
+        """
+        self.data = list()
+        self.offset = list()
+        self.prev = 0
+        self.type = type
+
+    def update(self, string, length_doc):
+        self.data.append(string)
+        self.prev += len(string) + 1
+        self.offset.append(str(self.prev) + ' ' + str(length_doc))
+
+    def write(self, finalCount):
+        filename = os.path.join(
+            "./inverted_index",
+            "{0}{1}.txt".format(
+                self.type,
+                finalCount))
+        with open(filename, 'w') as f:
+            f.write('\n'.join(self.data))
+
+        filename = os.path.join(
+            './inverted_index',
+            "offset_{0}{1}.txt".format(
+                self.type,
+                finalCount))
+        with open(filename, 'w') as f:
+            f.write('\n'.join(self.offset))
+
+
+def writeIntoFile(index, dictID, fileCount, titleOffset):
+    prevTitleOffset = titleOffset
+    data = []
+    for key in sorted(index.keys()):
+        postings = index[key]
+        string = key + ' ' + ' '.join(postings)
+        data.append(string)
+
+    filename = os.path.join(
+        './inverted_index',
+        'index{0}.txt'.format(fileCount))
+    with open(filename, 'w') as f:
+        f.write('\n'.join(data))
+
+    data = []
+    dataOffset = []
+    for key in sorted(dictID):
+        temp = ' '.join([str(key), dictID[key].strip()])
+        data.append(temp)
+        dataOffset.append(str(prevTitleOffset))
+        prevTitleOffset += len(temp) + 1
+
+    filename = os.path.join('./inverted_index', 'title.txt')
+    with open(filename, 'a') as f:
+        f.write('\n'.join(data))
+        f.write('\n')
+
+    filename = os.path.join('./inverted_index', 'titleOffset.txt')
+    with open(filename, 'a') as f:
+        f.write('\n'.join(dataOffset))
+        f.write('\n')
+
+    return prevTitleOffset
+
+
+def writeFinalIndex(data, finalCount, offsetSize):
+    """
+    Write the final inverted index to a file from the intermediate files.
+        Parameters:
+            data (list) : Posting list
+            finalCount (int) : Number of files
+            offsetSize (int) : The offset from the beginning of the file
+        Returns:
+            finalCount (int)
+            offsetSize (int)
+    """
+    information = {
         'title': defaultdict(dict),
         'body': defaultdict(dict),
         'info': defaultdict(dict),
@@ -53,237 +219,101 @@ def writeFinalIndex(data, finalCount, offsetSize, folderName):
         'link': r'.*l([0-9]*).*',
         'reference': r'.*r([0-9]*).*'
     }
-    infoData = {
-        'title': dataWriting('t'),
-        'body': dataWriting('b'),
-        'info': dataWriting('i'),
-        'category': dataWriting('c'),
-        'link': dataWriting('l'),
-        'reference': dataWriting('r')
+    fieldWriters = {
+        'title': FieldWriter('t'),
+        'body': FieldWriter('b'),
+        'info': FieldWriter('i'),
+        'category': FieldWriter('c'),
+        'link': FieldWriter('l'),
+        'reference': FieldWriter('r')
     }
-
-    distinctWords = []
-    offset = []
-
-    for key in tqdm.tqdm(sorted(data.keys())):
+    distWords = list()
+    offset = list()
+    for key in tqdm(sorted(data.keys())):
         docs = data[key]
+        temp = []
         for idx, posting in enumerate(docs):
-            id = re.sub(r'.*d([0-9]*).*', r'\1', posting)
+            ID = re.sub(r'.*d([0-9]*).*', r'\1', posting)
 
-            for k in info.keys():
+            for k in patterns.keys():
                 temp = re.sub(patterns[k], r'\1', posting)
                 if temp != posting:
-                    info[k][key][id] = float(temp)
-        
+                    information[k][key][ID] = float(temp)
+
         string = "{0} {1} {2}".format(key, finalCount, len(docs))
-        distinctWords.append(string)
+        distWords.append(string)
         offset.append(str(offsetSize))
         offsetSize += len(string) + 1
-    
-    for key in tqdm.tqdm(sorted(data.keys())):
-        for k in info.keys():
-            if key in info[k]:
-                string = key + " "
-                docs = sorted(info[k][key], key=info[k][key].get, reverse=True)
+
+    for key in tqdm(sorted(data.keys())):
+        for k in information.keys():
+            if key in information[k]:
+                string = key + ' '
+                docs = information[k][key]
+                docs = sorted(docs, key=docs.get, reverse=True)
                 for doc in docs:
-                    string += "{0} {1} ".format(doc, info[k][key][doc])
-                infoData[k].addData(string, len(docs))
-    for k in infoData.keys():
-        infoData[k].write(folderName, finalCount)
-    
-    with open(os.path.join(folderName, 'vocab.txt'), 'a') as f:
-        print('\n'.join(distinctWords), file=f)
-        print('\n', file=f)
-    
-    with open(os.path.join(folderName, 'offset.txt'), 'a') as f:
-        print('\n'.join(offset), file=f)
-        print('\n', file=f)
-    
+                    string += doc + ' ' + str(information[k][key][doc]) + ' '
+                fieldWriters[k].offset.append(
+                    str(fieldWriters[k].prev) + " " + str(len(docs)))
+                fieldWriters[k].prev += len(string) + 1
+                fieldWriters[k].data.append(string)
+
+    for k in fieldWriters.keys():
+        fieldWriters[k].write(finalCount)
+    filename = os.path.join('./inverted_index', 'vocab.txt')
+    with open(filename, 'a') as f:
+        f.write('\n'.join(distWords))
+        f.write('\n')
+
+    with open(os.path.join('./inverted_index', 'offset.txt'), 'a') as f:
+        f.write('\n'.join(offset))
+        f.write('\n')
+
     return finalCount + 1, offsetSize
 
-    
 
-
-def mergeIndex(fileCount, folderName):
+def mergeFiles(fileCount):
     words = defaultdict()
     files = defaultdict()
     top = defaultdict()
-    flag = [True for i in range(fileCount)]
+
+    flag = [False] * fileCount
     data = defaultdict(list)
-    heap = []
+    heap = list()
     finalCount = 0
     offsetSize = 0
 
     for i in range(fileCount):
-        filename = os.path.join(folderName, "index{0}.txt".format(i))
-        files[i] = open(filename, "r")
-
+        filename = os.path.join('./inverted_index', 'index{0}.txt'.format(i))
+        files[i] = open(filename, 'r')
+        flag[i] = True
         top[i] = files[i].readline().strip()
-        words[i] = top[i].split(":")
+        words[i] = top[i].split()
         if words[i][0] not in heap:
-            heapq.heappush(heap, words[i][0])
+            heappush(heap, words[i][0])
 
     count = 0
     while any(flag):
-        try:
-            temp = heapq.heappop(heap)
-        except:
-            print(heapq)
+        temp = heappop(heap)
         count += 1
 
         if count % 100000 == 0:
             oldFileCount = finalCount
-            finalCount, offsetSize = writeFinalIndex(data, finalCount, offsetSize, folderName)
-            if oldFileCount != finalCount:
+            finalCount, offsetSize = writeFinalIndex(
+                data, finalCount, offsetSize)
+            if not (oldFileCount == finalCount):
                 data = defaultdict(list)
+
         for i in range(fileCount):
             if flag[i]:
                 if words[i][0] == temp:
-                    data[temp].extend(words[i][1].split(" "))
+                    data[temp] += words[i][1:]
                     top[i] = files[i].readline().strip()
-                    if top[i] == '':
+                    if len(top[i]) == 0:
                         flag[i] = False
                         files[i].close()
-                    else:
-                        words[i] = top[i].split(":")
+                    elif top[i] != '':
+                        words[i] = top[i].split()
                         if words[i][0] not in heap:
-                            heapq.heappush(heap, words[i][0])
-    finalCount, offsetSize = writeFinalIndex(data, finalCount, offsetSize, folderName)
-
-
-# def writeIndexToFile(index, dictID, fileNum, titleOffset, folderName):
-#     prevTitleOffset = titleOffset
-#     data = []
-#     for key in sorted(index.keys()):
-#         string = key + ':' + ' '.join(index[key])
-#         data.append(string)
-
-#     fileName = os.path.join(folderName, "index{0}.txt".format(fileNum))
-#     with open(fileName, 'w') as f:
-#         print('\n'.join(data), file=f)
-
-#     data = []
-#     dataOffset = []
-
-#     for key in sorted(dictID):
-#         string = ' '.join([str(key), dictID[key].strip()])
-#         data.append(string)
-#         dataOffset.append(str(prevTitleOffset))
-#         prevTitleOffset += len(string) + 1
-
-#     fileName = os.path.join(folderName, "title.txt")
-#     with open(fileName, 'a') as f:
-#         print('\n'.join(data), file=f)
-
-#     fileName = os.path.join(folderName, "titleOffSet.txt")
-#     with open(fileName, 'a') as f:
-#         print('\n'.join(dataOffset), file=f)
-
-#     return prevTitleOffset
-
-
-class DocCleaner():
-    def __init__(self, stemmer, stopWords):
-        self.stemmer = stemmer
-        self.stopWords = stopWords
-
-    def removeStopWords(self, data):
-        return [word for word in data if word not in self.stopWords]
-
-    def cleanReferences(self, data):
-        # data = data.split("\n")
-        references = []
-        for line in data:
-            if "<ref" in line:
-                references.append(
-                    re.sub(
-                        r'.*title[\ ]*=[\ ]*([^\|]*).*',
-                        r' ',
-                        line))
-
-        data = tokenize(' '.join(references))
-        data = self.removeStopWords(data)
-        data = self.stemmer.stemWords(data)
-
-        return data
-
-    def cleanTitle(self, title):
-        title = tokenize(title)
-        title = self.removeStopWords(title)
-        title = self.stemmer.stemWords(title)
-        return title
-
-    def cleanInfoBox(self, data):
-        data = data.split("\n")
-        flag = False
-        box = []
-        for line in data:
-            if 'infobox' in line:
-                flag = True
-                box.append(re.sub(r'\{\{infobox(.*)', r' ', line))
-            elif flag:
-                if '}}' in line:
-                    flag = False
-                    continue
-                box.append(line)
-        data = tokenize(' '.join(box))
-        data = self.removeStopWords(data)
-        data = self.stemmer.stemWords(data)
-
-        return data
-
-    def cleanBody(self, text):
-        data = re.sub(r'\{\{.*\}\}', r' ', text)
-        data = tokenize(data)
-        data = self.removeStopWords(data)
-        data = self.stemmer.stemWords(data)
-
-        return data
-
-    def cleanExternalLinks(self, data):
-        # data = data.split('\n')
-        links = []
-        for line in data:
-            if re.match(r'\*[\ ]*\[', line):
-                links.append(line)
-
-        data = tokenize(' '.join(links))
-        data = self.removeStopWords(data)
-        data = self.stemmer.stemWords(data)
-
-        return data
-
-    def cleanCategories(self, data):
-        # data = data.split("\n")
-        categories = []
-        for idx in range(len(data)):
-            line = data[idx]
-            if re.match(r'\[\[category', line):
-                categories.append(
-                    re.sub(
-                        r'\[\[category:(.*)\]\]',
-                        r'\1',
-                        line))
-        data = tokenize(' '.join(categories))
-        data = self.removeStopWords(data)
-        data = self.stemmer.stemWords(data)
-        return data
-
-    def cleanData(self, ID, text, title):
-        text = text.lower()
-        title = title.lower()
-        references = []
-        links = []
-        categories = []
-        data = text.split("==references==")
-
-        if len(data) == 1:
-            data = text.split('== references == ')
-        else:
-            references = self.cleanReferences(data[1].split("\n"))
-            links = self.cleanExternalLinks(data[1].split("\n"))
-            categories = self.cleanCategories(data[1].split("\n"))
-        title = self.cleanTitle(title)
-        infobox = self.cleanInfoBox(data[0])
-        body = self.cleanBody(data[0])
-        return title, body, infobox, references, links, categories
+                            heappush(heap, words[i][0])
+    finalCount, offsetSize = writeFinalIndex(data, finalCount, offsetSize)
